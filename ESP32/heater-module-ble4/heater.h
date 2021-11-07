@@ -3,18 +3,13 @@
 
 #include "serial.h"
 
-// Use TB9051FTG Single Brushed DC Motor Driver https://www.pololu.com/product/2997 to operate TEC
-//#define fanPin 4
-//#define OUT1Pin 5 // forward driving current (heating)
-//#define OUT2Pin 6 // reverse driving current (cooling)
-//#define BLEDPin 9
+// define pin
 #define RLEDPin 25 ///TinyICO
 #define HeaterPin 26 ///TinyICO
 #define R0Pin 27     ///TinyICO
 #define RxPin 15     ///TinyICO
-#define LED12  25    // LED pin 12
 
-
+// const variables for PWM
 const int freq = 5000; ///TinyICO
 const int PWMChannel = 0; ///TinyICO
 const int PWMChannelLed = 1; ///TinyICO
@@ -49,8 +44,8 @@ extern int LED_STATE;
 void setupHeater();
 
 double readTemp();
-void setTemp(float setPoint, float hold_time);
-void setTemp(float setPoint, float hold_time, boolean detect);
+void setTemp(float setPoint, float hold_time, float image_every);
+void setTemp(float setPoint, float hold_time, float image_every, boolean detect);
 void cycle();
 
 #endif

@@ -27,24 +27,27 @@
  *  13    
  * 
  */
-//String blockTemp = "";
+
 void setup() {
-  setupHeater();
+  setupHeater(); //
   setupSerial();
   setupBLE();
 }
 
 void loop() {
-  //input(true); // reads input from Serial
-  //delay(1);
     // notify changed value
     if (deviceConnected) {
         //blockTemp = "t=" + String(readTemp());
         //pCharacteristic->setValue(blockTemp.c_str());
         //pCharacteristic->notify();
-        //delay(100); // bluetooth stack will go into congestion, if too many packets are sent, in 6 hours test i was able to go as low as 3ms
-        if (assay_start == true) {
-          setTemp(set_temp,hold_time);
+        delay(100); // bluetooth stack will go into congestion, if too many packets are sent, in 6 hours test i was able to go as low as 3ms
+        if (start_assay == true) {
+          setTemp(set_temp,hold_time,image_every);
+        }
+        else {
+          dataframe = system_status + "," + String(readTemp()) + "," + led_status + "," + String(take_image) + "," + String(millis());
+          writeBLE(dataframe);
+          Serial.println(dataframe);
         }
     }
     // disconnecting

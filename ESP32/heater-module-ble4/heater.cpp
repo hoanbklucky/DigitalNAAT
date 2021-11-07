@@ -31,19 +31,6 @@ int outputPWM = 0;
 String blockTemp ="";
 
 void setupHeater() {
-  //pinMode(OUT1Pin, OUTPUT);
-  //pinMode(OUT2Pin, OUTPUT);
-  //pinMode(BLEDPin, OUTPUT);
-  //pinMode(RLEDPin, OUTPUT);
-  //pinMode(fanPin, OUTPUT);
-
-  
-  //analogWrite(OUT1Pin, 0);
-  //analogWrite(OUT2Pin, 0);
-  //digitalWrite(fanPin, LOW);
-  //analogWrite(BLEDPin, 255);
-  //analogWrite(RLEDPin, 255);
-
   // configure PWM channel for Heater
   ledcSetup(PWMChannel, freq, resolution); // TinyPICO
   // attach the PWM channel for Heater to the GPIO pin connected to Heater and set to 0 (no heating) 
@@ -55,6 +42,7 @@ void setupHeater() {
   // attach the PWM channel for Heater to the GPIO pin connected to Red LED and set to 0 (turn off)
   ledcAttachPin(RLEDPin, PWMChannelLed); // TinyPICO
   ledcWrite(PWMChannelLed, 0);  // TinyPICO turn off LED at the begining
+  led_status = "off";
 
 //    pinMode(RLEDPin, OUTPUT);
 //    digitalWrite(RLEDPin, 0);
@@ -79,6 +67,7 @@ double readTemp() {
   return temp;
 }
 
+
 float currentTemp;
 float previousError =0;
 float integralError =0;
@@ -86,10 +75,10 @@ float derivative =0;
 float error =0;
 
 // Set temperature (PID controlled)
-void setTemp(float setPoint, float hold_time){
-   setTemp(setPoint, hold_time,false);
+void setTemp(float setPoint, float hold_time, float image_every){
+   setTemp(setPoint, hold_time, image_every, false);
 }
-void setTemp(float setPoint, float hold_time, boolean detect)
+void setTemp(float setPoint, float hold_time, float image_every, boolean detect)
 {
   previousError = 0;
   integralError = 0;
@@ -102,14 +91,18 @@ void setTemp(float setPoint, float hold_time, boolean detect)
   boolean FAM_pic = detect && FAM_CHANNEL;
   boolean CY5_pic = detect && CY5_CHANNEL;
   boolean takingPic = false;
-  float startTime;
-  float printTime = millis(); //record time when received command about temp
-  float stepduration = hold_time * 1000; //convert from second to milisecond
+  float start_holding_timepoint;
+  float image_timepoint;
+  float print_timepoint = millis(); //record time point when setTemp function start
   
-
-  //Serial.print("Setting temperature to " + String(setPoint) + " degC");
+  float hold_time_mils = hold_time *60 * 1000; //convert from minute to millisecond
+  float image_every_mils = image_every * 60 * 1000;//convert from minute to millisecond
+  
+  Serial.println("Setting temperature to " + String(setPoint) + " degC");
+  //Change system status to heating
+  system_status = "heating";
   while (!done) {
-    // Calculate PID
+    // Calculate PID and PWM
     currentTemp = readTemp();
     error = setPoint - currentTemp;
     derivative = error - previousError;
@@ -117,106 +110,72 @@ void setTemp(float setPoint, float hold_time, boolean detect)
     previousError = error;
     outputPWM = Kp * error + Ki * integralError + Kd * derivative;
 
-  // PWM modifiers
+    // PWM modifiers
     outputPWM = constrain(map((int)outputPWM, 0, 1000, 0, MAX_PWM), 0, MAX_PWM);
 
-//    // Fan cool if overshooting temperature
-//    if(error < -5){
-//      digitalWrite(fanPin,HIGH);
-//    }
-//    else if(error > 0){
-//      digitalWrite(fanPin, LOW);
-//    }
-
-    // Bidirectional current control
+    // Output PWM to Heater
     if (outputPWM < 0) {
       outputPWM = 0;
-//      analogWrite(OUT1Pin, 0);
-//      analogWrite(OUT2Pin, 0);
       ledcWrite(PWMChannel, 0);
     }
     if (outputPWM >= 0) {
-//      analogWrite(OUT1Pin, outputPWM);
-//      analogWrite(OUT2Pin, 0);
-        ledcWrite(PWMChannel, outputPWM);    //TinyPICO
+      ledcWrite(PWMChannel, outputPWM);    //TinyPICO
     }
 
     // Timer starts counting down
     if (!setReached && abs(error) < 1)
     {
       // if temp hasn't been reached yet, check if it's within threshold
-      startTime = millis();  // record time when target temp reached
       setReached = true;        // target temp reached
-      
-      Serial.print(F("\t Target temp reached."));
-      //writeBLE("tempreached"); //write to App that target temp reached
-      //Turn on Red LED to indicate temp reached
-      //ledcWrite(PWMChannelLed, 255); //TinyPICO
-      //digitalWrite(RLEDPin, 1);
-      
+      system_status = "running"; //change status
+      //record this time point 
+      start_holding_timepoint = millis();  // record time point when difference between currentTemp and setPoint < 1, ie start holding temp
+      image_timepoint = millis(); // record time point 
+      //print to serial monitor
+      Serial.println(F("\t Target temp reached."));
+      //prepare dataframe and send to App and serial monitor
+      remaining_time = hold_time - (millis() - start_holding_timepoint)/(1000*60); // remaining time in minute = total hold time - (current time point - time point when set_temp reached and start holding)
+      dataframe = system_status + "," + String(currentTemp) + "," + led_status + "," + String(take_image) + "," + String(remaining_time);
+      writeBLE(dataframe); // send to App
+      Serial.println(dataframe); //print to serial monitor
     }
 
-    // (add time interval acquisition routine here)
-    if (millis() - printTime >= time_int) {
-      printTime = printTime + time_int; //after every time_int, send current temp to serial port
-      Serial.print("T,"); // indicates time/temp measurement for Pi logging
-      Serial.print((printTime - init_time) / 1000.0);
-      Serial.println(",");
-      //Serial.println(readTemp());
-      //blockTemp = "t=" + String(readTemp());
-      //std::string value = pCharacteristic->getValue();
-      //writeBLE("hello"); //after every time_int, send current temp to App
-      blockTemp = "t=" + String(printTime - init_time);
-      pCharacteristic->setValue(blockTemp.c_str()); // Return status
-      pCharacteristic->notify();
+    // REPORTING send dataframe (info about the system) to serial monitor and App every time_int (eg 1000 milisecond)
+    if (millis() - print_timepoint >= time_int) {
+      print_timepoint = print_timepoint + time_int; //after every time_int, send current temp to serial port
+      //prepare dataframe
+      if (setReached == true) {
+        remaining_time = hold_time - (millis() - start_holding_timepoint)/(1000*60); // remaining time in minute = total hold time - (current time point - time point when set_temp reached and start holding)
+        dataframe = system_status + "," + String(currentTemp) + "," + led_status + "," + String(take_image) + "," + String(remaining_time);
+      } else {
+        dataframe = system_status + "," + String(currentTemp) + "," + led_status + "," + String(take_image) + "," + String(millis());
+      }
+      writeBLE(dataframe); // send to App
+      Serial.println(dataframe); // send to serial monitor
+    }
+
+    if (setReached == true && (millis() - image_timepoint) > image_every_mils) {
+      image_timepoint = image_timepoint + image_every_mils;
+      ledcWrite(PWMChannelLed, 255);    //Turn on LED
+      led_status = "on"; 
+      Serial.println("Led is ON");
+      //tell App to take image
+      take_image = true;  
+      remaining_time = hold_time - (millis() - start_holding_timepoint)/(1000*60); // remaining time in minute = total hold time - (current time point - time point when set_temp reached and start holding)
+      dataframe = system_status + "," + String(currentTemp) + "," + led_status + "," + String(take_image) + "," + String(remaining_time);
+      writeBLE(dataframe); // send to App
+      Serial.println(dataframe);
     }
 
 //    // End temperature hold when timer runs out and pictures have been taken
-    if (setReached == true && (millis() - startTime) > stepduration) {
-      Serial.println(F("\t Hold temp complete."));
-      assay_start = false;
-      //writeBLE("done"); //write to App that the process is done
-      //Turn off Red LED to indicate hold time complete
-      //ledcWrite(PWMChannelLed, 0);  //TinyPICO
-      //digitalWrite(RLEDPin, 0);
-      
-      if(takingPic){
-        input(false);
-        // Pi will send a "P" when the picture has been taken
-        if(message == "P"){
-          takingPic = false;
-          //Turn off LEDs
-//          analogWrite(RLEDPin, 255);
-//          analogWrite(BLEDPin, 255);
-          LED_STATE = 0;
-          message = "";
-        }
-        
-      }
-      else if(FAM_pic){
-        takingPic = true;
-//        analogWrite(RLEDPin, 255);
-//        analogWrite(BLEDPin, BLED_PWM);
-        LED_STATE = 1;
-        Serial.println("PB"); 
-        FAM_pic = false;     
-      }
-      else if(CY5_pic){
-        takingPic = true;
-//        analogWrite(BLEDPin, 255);
-//        analogWrite(RLEDPin, RLED_PWM);
-        LED_STATE = 2;
-        Serial.println("PR"); 
-        CY5_pic = false;  
-      }
-      else{
-        done = true;  // Temperature reached, held long enough time, pictures taken
-//        digitalWrite(fanPin,LOW);
-//        analogWrite(OUT1Pin, 0);
-//        analogWrite(OUT2Pin, 0);
-        //analogWrite(HeaterPin, 0); //TinyPICO
-        ledcWrite(PWMChannel, outputPWM);
-      }      
+    if (setReached == true && (millis() - start_holding_timepoint) > hold_time_mils) {
+      start_assay = false;
+      system_status = "done";
+      Serial.println(F("\t Hold temp completed."));
+      //prepare dataframe
+      dataframe = system_status + "," + String(currentTemp) + "," + led_status + "," + String(take_image) + "," + "NA";
+      writeBLE(dataframe); // send to App
+      Serial.println(dataframe);
     }
 
     // PID loop interval
