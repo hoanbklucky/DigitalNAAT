@@ -8,3 +8,5 @@ Source code for smartphone-enabled digital CRISPR device:
 3. Open the app and connect with the ESP32 using Bluetooth (you may need to adjust Bluetooth settings of your phone for Bluetooth to work).
 4. Set up parameters for the assay and press "Start".
 Note: may need to turn on an background app (e.g., play a Youtube video in the background) to prevent the phone from going to sleep.
+
+For more info about the device and program flowcharts, see https://www.medrxiv.org/content/10.1101/2023.05.12.23289911v1
